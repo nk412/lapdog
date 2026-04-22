@@ -154,12 +154,22 @@ def draw(elapsed: float, running: bool, laps: list, style: str) -> None:
 
     status_color = GREEN if running else YELLOW
     status_text  = "RUNNING" if running else "PAUSED "
-    lines.append(f"{CLR_LINE}  {status_color}●{RESET} {status_text}\n")
+    lines.append(
+        f"{CLR_LINE}  {status_color}●{RESET} {status_text}"
+        f"   {DIM}style: {style}{RESET}\n"
+    )
     lines.append(f"{CLR_LINE}\n")
 
-    for row in big_lines(fmt_hms(elapsed), style):
-        lines.append(f"{CLR_LINE}  {CYAN}{BOLD}{row}{RESET}\n")
-    lines.append(f"{CLR_LINE}  {DIM}{fmt_ms(elapsed)}   style: {style}{RESET}\n")
+    big = big_lines(fmt_hms(elapsed), style)
+    ms_text = fmt_ms(elapsed)
+    for i, row in enumerate(big):
+        if i == BIG_ROWS - 1:
+            lines.append(
+                f"{CLR_LINE}  {CYAN}{BOLD}{row}{RESET}"
+                f" {DIM}{ms_text}{RESET}\n"
+            )
+        else:
+            lines.append(f"{CLR_LINE}  {CYAN}{BOLD}{row}{RESET}\n")
     lines.append(f"{CLR_LINE}\n")
 
     if laps:
