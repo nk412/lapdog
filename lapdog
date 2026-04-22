@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""lapdog — a loyal little CLI stopwatch.
+
+Controls:
+  space   start / pause
+  l       record lap
+  r       reset
+  q       quit
+"""
+
+import signal
+import select
+import sys
+import termios
+import time
+import tty
+
+
+# ---------- formatting ----------
+
+def fmt(seconds: float) -> str:
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = seconds % 60
+    return f"{h:02d}:{m:02d}:{s:06.3f}"
+
+
+# ---------- ANSI ----------
+
+CLEAR       = "\033[2J\033[H"
+HOME        = "\033[H"
+CLR_LINE    = "\033[K"
+CLR_BELOW   = "\033[J"
+HIDE_CURSOR = "\033[?25l"
+SHOW_CURSOR = "\033[?25h"
+RESET       = "\033[0m"
+BOLD        = "\033[1m"
+DIM         = "\033[2m"
+CYAN        = "\033[96m"
+YELLOW      = "\033[93m"
+GREEN       = "\033[92m"
+MAGENTA     = "\033[95m"
+
+
+# ---------- input ----------
+
+def read_key(timeout: float = 0.03):
+    r, _, _ = select.select([sys.stdin], [], [], timeout)
+    if r:
+        return sys.stdin.read(1)
+    return None
+
+
+# ---------- rendering ----------
+
+def draw(elapsed: float, running: bool, laps: list) -> None:
+    lines = []
+    lines.append(HOME)
+    lines.append(f"{CLR_LINE}{MAGENTA}{BOLD}  🐕 lapdog{RESET}  {DIM}— your loyal stopwatch{RESET}\n")
+    lines.append(f"{CLR_LINE}\n")
+
+    status_color = GREEN if running else YELLOW
+    status_text  = "RUNNING" if running else "PAUSED "
+    lines.append(f"{CLR_LINE}  {status_color}●{RESET} {status_text}\n")
+    lines.append(f"{CLR_LINE}\n")
+    lines.append(f"{CLR_LINE}  {CYAN}{BOLD}{fmt(elapsed)}{RESET}\n")
+    lines.append(f"{CLR_LINE}\n")
+
+    if laps:
+        lines.append(f"{CLR_LINE}  {DIM}Laps:{RESET}\n")
+        recent = laps[-8:]
+        offset = len(laps) - len(recent)
+        for i, (total, split) in enumerate(recent):
+            n = offset + i + 1
+            lines.append(
+                f"{CLR_LINE}    {DIM}#{n:2d}{RESET}  {fmt(total)}  "
+                f"{DIM}(+{fmt(split)}){RESET}\n"
+            )
+        lines.append(f"{CLR_LINE}\n")
+
+    lines.append(
+        f"{CLR_LINE}  {DIM}[space] start/pause   [l] lap   "
+        f"[r] reset   [q] quit{RESET}\n"
+    )
+    lines.append(CLR_BELOW)
+
+    sys.stdout.write("".join(lines))
+    sys.stdout.flush()
+
+
+# ---------- main ----------
+
+def main() -> None:
+    if not sys.stdin.isatty():
+        print("lapdog needs an interactive terminal.", file=sys.stderr)
+        sys.exit(1)
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+
+    def cleanup():
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        sys.stdout.write(SHOW_CURSOR + RESET + "\n")
+        sys.stdout.flush()
+
+    signal.signal(signal.SIGINT, lambda *_: (cleanup(), sys.exit(0)))
+
+    try:
+        tty.setcbreak(fd)
+        sys.stdout.write(CLEAR + HIDE_CURSOR)
+        sys.stdout.flush()
+
+        running        = False
+        start_ts       = 0.0   # monotonic time when current run began
+        accumulated    = 0.0   # seconds banked before current run
+        laps: list     = []    # (total_elapsed, split_from_previous_lap)
+        last_lap_total = 0.0
+
+        while True:
+            elapsed = accumulated + (time.monotonic() - start_ts) if running else accumulated
+            draw(elapsed, running, laps)
+
+            key = read_key()
+            if key is None:
+                continue
+            key = key.lower()
+
+            if key == "q":
+                break
+
+            elif key == " ":
+                if running:
+                    accumulated += time.monotonic() - start_ts
+                    running = False
+                else:
+                    start_ts = time.monotonic()
+                    running = True
+
+            elif key == "l" and (running or elapsed > 0):
+                split = elapsed - last_lap_total
+                laps.append((elapsed, split))
+                last_lap_total = elapsed
+
+            elif key == "r":
+                running        = False
+                start_ts       = 0.0
+                accumulated    = 0.0
+                laps           = []
+                last_lap_total = 0.0
+
+    finally:
+        cleanup()
+
+
+if __name__ == "__main__":
+    main()
